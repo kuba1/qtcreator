@@ -220,6 +220,7 @@ FakeVimSettings *theFakeVimSettings()
     createAction(s, ConfigBackspace,      _("indent,eol,start"), _("ConfigBackspace"), _("bs"));
     createAction(s, ConfigIsKeyword,      _("@,48-57,_,192-255,a-z,A-Z"), _("IsKeyword"), _("isk"));
     createAction(s, ConfigClipboard,      QString(), _("Clipboard"), _("cb"));
+    createAction(s, ConfigEasyMotion,     false, _("EasyMotion"));
 
     return s;
 }

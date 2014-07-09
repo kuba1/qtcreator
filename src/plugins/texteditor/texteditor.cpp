@@ -447,6 +447,8 @@ public:
 
     QScopedPointer<AutoCompleter> m_autoCompleter;
     CommentDefinition m_commentDefinition;
+
+    QSharedPointer<IOverlay> m_easyMotionOverlay;
 };
 
 TextEditorWidgetPrivate::TextEditorWidgetPrivate(TextEditorWidget *parent)
@@ -2532,6 +2534,14 @@ bool TextEditorWidget::event(QEvent *e)
         break;
     }
 
+    if (e->type() == EasyMotionOverlayEvent::OverlayEventType) {
+        EasyMotionOverlayEvent *ev = static_cast<EasyMotionOverlayEvent *>(e);
+        if (ev->show())
+            d->m_easyMotionOverlay = ev->overlay();
+        else
+            d->m_easyMotionOverlay.clear();
+        viewport()->update();
+    }
     return QPlainTextEdit::event(e);
 }
 
@@ -4145,6 +4155,9 @@ void TextEditorWidget::paintEvent(QPaintEvent *e)
                                 visibleCollapsedBlockOffset,
                                 er);
     }
+
+    if (d->m_easyMotionOverlay)
+        d->m_easyMotionOverlay->paint(painter);
 }
 
 void TextEditorWidget::paintBlock(QPainter *painter,

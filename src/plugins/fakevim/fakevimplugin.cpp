@@ -458,6 +458,8 @@ QWidget *FakeVimOptionPage::widget()
 
         m_group.insert(theFakeVimSetting(ConfigRelativeNumber),
                        m_ui.checkBoxRelativeNumber);
+        m_group.insert(theFakeVimSetting(ConfigEasyMotion),
+                       m_ui.checkBoxEasyMotion);
 
         connect(m_ui.pushButtonCopyTextEditorSettings, &QAbstractButton::clicked,
                 this, &FakeVimOptionPage::copyTextEditorSettings);
@@ -1054,6 +1056,7 @@ private slots:
 
     void setUseFakeVim(const QVariant &value);
     void setUseFakeVimInternal(bool on);
+    void setEnableEasyMotion(const QVariant &value);
     void quitFakeVim();
     void triggerCompletions();
     void triggerSimpleCompletions(const QString &needle, bool forward);
@@ -1283,6 +1286,8 @@ bool FakeVimPluginPrivate::initialize()
             this, &FakeVimPluginPrivate::maybeReadVimRc);
     connect(theFakeVimSetting(ConfigRelativeNumber), &Utils::SavedAction::valueChanged,
             this, &FakeVimPluginPrivate::setShowRelativeLineNumbers);
+    connect(theFakeVimSetting(ConfigEasyMotion), &Utils::SavedAction::valueChanged,
+            this, &FakeVimPluginPrivate::setEnableEasyMotion);
 
     // Delayed operations.
     connect(this, &FakeVimPluginPrivate::delayedQuitRequested,
@@ -1915,6 +1920,12 @@ void FakeVimPluginPrivate::setUseFakeVimInternal(bool on)
                 m_editorToHandler[editor]->restoreWidget(textDocument->tabSettings().m_tabSize);
         }
     }
+}
+
+void FakeVimPluginPrivate::setEnableEasyMotion(const QVariant &value)
+{
+    foreach(IEditor *editor, m_editorToHandler.keys())
+        m_editorToHandler[editor]->setEnableEasyMotion(value.toBool());
 }
 
 void FakeVimPluginPrivate::triggerCompletions()

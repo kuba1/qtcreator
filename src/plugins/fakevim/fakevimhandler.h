@@ -100,6 +100,7 @@ public:
     void disconnectFromEditor();
 
     static void updateGlobalMarksFilenames(const QString &oldFileName, const QString &newFileName);
+    void setEnableEasyMotion(bool state);
 
 public slots:
     void setCurrentFileName(const QString &fileName);
