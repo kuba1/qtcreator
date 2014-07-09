@@ -62,6 +62,7 @@
 
 #include "fakevimactions.h"
 #include "fakevimtr.h"
+#include "easymotionhandler.h"
 
 #include <utils/hostosinfo.h>
 #include <utils/qtcassert.h>
@@ -193,7 +194,8 @@ enum SubMode
     ReplaceSubMode,      // Used for r
     MacroRecordSubMode,  // Used for q
     MacroExecuteSubMode, // Used for @
-    CtrlVSubMode         // Used for Ctrl-v in insert mode
+    CtrlVSubMode,        // Used for Ctrl-v in insert mode
+    EasyMotionSubMode
 };
 
 /*! A \e SubSubMode is used for things that require one more data item
@@ -211,7 +213,8 @@ enum SubSubMode
     OpenSquareSubSubMode,  // Used for [{, {(, [z
     CloseSquareSubSubMode, // Used for ]}, ]), ]z
     SearchSubSubMode,
-    CtrlVUnicodeSubSubMode // Used for Ctrl-v based unicode input
+    CtrlVUnicodeSubSubMode,// Used for Ctrl-v based unicode input
+    EasyMotionSubSubMode
 };
 
 enum VisualMode
@@ -2158,6 +2161,8 @@ public:
 
     void miniBufferTextEdited(const QString &text, int cursorPos, int anchorPos);
 
+    QScopedPointer<EasyMotionHandler> m_easyMotionHandler;
+
     // Data shared among editors with same document.
     struct BufferData
     {
@@ -2344,6 +2349,7 @@ void FakeVimHandler::Private::init()
     m_ctrlVAccumulator = 0;
     m_ctrlVLength = 0;
     m_ctrlVBase = 0;
+    m_easyMotionHandler.reset(new EasyMotionHandler(&m_cursor, m_plaintextedit));
 
     initSingleShotTimer(&m_fixCursorTimer, 0, this, SLOT(onFixCursorTimeout()));
     initSingleShotTimer(&m_inputTimer, 1000, this, SLOT(onInputTimeout()));
@@ -3541,6 +3547,10 @@ void FakeVimHandler::Private::clearCurrentMode()
     m_register = '"';
     g.rangemode = RangeCharMode;
     g.currentCommand.clear();
+
+    if (m_easyMotionHandler)
+        m_easyMotionHandler->reset();
+
     resetCount();
 }
 
@@ -3772,6 +3782,13 @@ bool FakeVimHandler::Private::handleCommandSubSubMode(const Input &input)
                            .arg(g.subsubmode == OpenSquareSubSubMode ? '[' : ']')
                            .arg(input.text()));
         }
+    } else if (g.subsubmode == EasyMotionSubSubMode){
+        if (m_easyMotionHandler) {
+            handled = m_easyMotionHandler->handle(input.asChar());
+            if (m_easyMotionHandler->isReset())
+                clearCurrentMode();
+        } else
+            handled = false;
     } else {
         handled = false;
     }
@@ -4108,6 +4125,12 @@ EventResult FakeVimHandler::Private::handleCommandMode(const Input &input)
         || g.submode == DownCaseSubMode
         || g.submode == UpCaseSubMode) {
         handled = handleChangeCaseSubMode(input);
+    } else if (g.submode == EasyMotionSubMode) {
+        if (m_easyMotionHandler) {
+            handled = m_easyMotionHandler->handle(input.asChar());
+            g.subsubmode = EasyMotionSubSubMode;
+        } else
+            handled = false;
     }
 
     if (!handled && isOperatorPending())
@@ -4180,7 +4203,10 @@ bool FakeVimHandler::Private::handleNoSubMode(const Input &input)
     } else if (input.is('"')) {
         g.submode = RegisterSubMode;
     } else if (input.is(',')) {
-        passShortcuts(true);
+        if (m_easyMotionHandler)
+            g.submode = EasyMotionSubMode;
+        else
+            passShortcuts(true);
     } else if (input.is('.')) {
         //qDebug() << "REPEATING" << quoteUnprintable(g.dotCommand) << count()
         //    << input;
@@ -8501,6 +8527,15 @@ void FakeVimHandler::updateGlobalMarksFilenames(const QString &oldFileName, cons
         if (mark.fileName() == oldFileName)
             mark.setFileName(newFileName);
     }
+}
+
+void FakeVimHandler::setEnableEasyMotion(bool state)
+{
+    if (state) {
+        d->m_easyMotionHandler.reset(
+                    new EasyMotionHandler(&d->m_cursor, d->m_plaintextedit));
+    } else
+        d->m_easyMotionHandler.reset();
 }
 
 bool FakeVimHandler::eventFilter(QObject *ob, QEvent *ev)

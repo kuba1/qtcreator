@@ -107,7 +107,8 @@ enum FakeVimSettingsCode
     ConfigClipboard,
     ConfigShowCmd,
     ConfigScrollOff,
-    ConfigRelativeNumber
+    ConfigRelativeNumber,
+    ConfigEasyMotion
 };
 
 class FakeVimSettings : public QObject

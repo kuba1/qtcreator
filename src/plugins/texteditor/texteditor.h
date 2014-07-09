@@ -129,6 +129,55 @@ enum TextMarkRequestKind
     TaskMarkRequest
 };
 
+class IOverlay
+{
+public:
+    virtual void paint(QPainter &painter) = 0;
+
+    virtual ~IOverlay()
+    {
+    }
+};
+
+class EasyMotionOverlayEvent : public QEvent
+{
+public:
+    EasyMotionOverlayEvent() :
+        QEvent(OverlayEventType),
+        m_overlay(0),
+        m_show(false)
+    {
+
+    }
+
+    void setOverlay(const QSharedPointer<IOverlay> &overlay)
+    {
+        m_overlay = overlay;
+    }
+
+    void setShow(const bool show)
+    {
+        m_show = show;
+    }
+
+    QSharedPointer<IOverlay> overlay() const
+    {
+        return m_overlay;
+    }
+
+    bool show() const
+    {
+        return m_show;
+    }
+
+    static const QEvent::Type OverlayEventType =
+            static_cast<QEvent::Type>(QEvent::User + 1);
+
+private:
+    QSharedPointer<IOverlay> m_overlay;
+    bool m_show;
+};
+
 class TEXTEDITOR_EXPORT BaseTextEditor : public Core::IEditor
 {
     Q_OBJECT
