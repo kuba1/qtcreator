@@ -1,8 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) 2015 BlackBerry Limited. All rights reserved.
-**
-** Contact: BlackBerry (qt@blackberry.com)
+** Copyright (C) 2015 The Qt Company Ltd.
+** Contact: http://www.qt.io/licensing
 **
 ** This file is part of Qt Creator.
 **
@@ -29,50 +28,51 @@
 **
 ****************************************************************************/
 
-#include "srcprojectpathchooser.h"
+#ifndef VCSBASE_PROJECTCACHE_H
+#define VCSBASE_PROJECTCACHE_H
 
-#include <QDirIterator>
+#include <utils/fileutils.h>
 
-namespace Qnx {
+#include <QList>
+#include <QObject>
+
+namespace ProjectExplorer { class Project; }
+
+namespace VcsBase {
 namespace Internal {
 
-SrcProjectPathChooser::SrcProjectPathChooser(QWidget *parent) :
-    Utils::PathChooser(parent)
-{
-    setPromptDialogTitle(tr("Choose imported Cascades project directory"));
-    setExpectedKind(Utils::PathChooser::ExistingDirectory);
-}
+class VcsPlugin;
 
-SrcProjectPathChooser::~SrcProjectPathChooser()
-{
-}
+class VcsProjectCache : public QObject {
+public:
+    static ProjectExplorer::Project *projectFor(const QString &repo);
 
-bool SrcProjectPathChooser::validatePath(const QString &path, QString *errorMessage)
-{
-    if (!Utils::PathChooser::validatePath(path, errorMessage))
-        return false;
+private:
+    VcsProjectCache();
+    ~VcsProjectCache();
 
-    bool proFound = false;
-    bool barDescriptorFound = false;
-    QDirIterator di(path);
-    while (di.hasNext()) {
-        di.next();
-        QFileInfo fi = di.fileInfo();
-        if (fi.isFile()) {
-            if (fi.fileName() == QLatin1String("bar-descriptor.xml"))
-                barDescriptorFound = true;
-            else if (fi.fileName().endsWith(QLatin1String(".pro")))
-                proFound = true;
-        }
-        if (barDescriptorFound && proFound)
-            break;
-    }
-    const bool ret = barDescriptorFound && proFound;
-    if (!ret && errorMessage)
-        *errorMessage = tr("Directory does not seem to be a valid Cascades project.");
-    return ret;
-}
+    static void invalidate();
+    static ProjectExplorer::Project *projectForToplevel(const Utils::FileName &vcsTopLevel);
 
+    static void create();
+    static void destroy();
+
+    class CacheNode {
+    public:
+        CacheNode(const QString &r, ProjectExplorer::Project *p) : repository(r), project(p)
+        { }
+
+        QString repository;
+        ProjectExplorer::Project *project;
+    };
+    QList<CacheNode> m_cache;
+
+    static VcsProjectCache *m_instance;
+
+    friend class VcsPlugin;
+};
 
 } // namespace Internal
-} // namespace Qnx
+} // namespace VcsBase
+
+#endif // VCSBASE_PROJECTCACHE_H

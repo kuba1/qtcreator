@@ -288,10 +288,9 @@ LocatorWidget::LocatorWidget(Locator *qop) :
     connect(m_entriesWatcher, &QFutureWatcher<LocatorFilterEntry>::finished,
             this, &LocatorWidget::handleSearchFinished);
 
-    m_showPopupTimer = new QTimer(this);
-    m_showPopupTimer->setInterval(100);
-    m_showPopupTimer->setSingleShot(true);
-    connect(m_showPopupTimer, SIGNAL(timeout()), SLOT(showPopupNow()));
+    m_showPopupTimer.setInterval(100);
+    m_showPopupTimer.setSingleShot(true);
+    connect(&m_showPopupTimer, SIGNAL(timeout()), SLOT(showPopupNow()));
 
     m_progressIndicator = new Utils::ProgressIndicator(Utils::ProgressIndicator::Small,
                                                        m_fileLineEdit);
@@ -327,8 +326,7 @@ void LocatorWidget::updateFilterList()
         if (!actionCopy.contains(filterId)) {
             // register new action
             action = new QAction(filter->displayName(), this);
-            cmd = ActionManager::registerAction(action, locatorId,
-                               Context(Constants::C_GLOBAL));
+            cmd = ActionManager::registerAction(action, locatorId);
             cmd->setAttribute(Command::CA_UpdateText);
             connect(action, SIGNAL(triggered()), this, SLOT(filterSelected()));
             action->setData(qVariantFromValue(filter));
@@ -454,12 +452,12 @@ void LocatorWidget::showCompletionList()
 void LocatorWidget::showPopup()
 {
     m_updateRequested = true;
-    m_showPopupTimer->start();
+    m_showPopupTimer.start();
 }
 
 void LocatorWidget::showPopupNow()
 {
-    m_showPopupTimer->stop();
+    m_showPopupTimer.stop();
     updateCompletionList(m_fileLineEdit->text());
     showCompletionList();
 }

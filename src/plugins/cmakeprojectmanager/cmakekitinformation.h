@@ -1,8 +1,7 @@
 /****************************************************************************
 **
-** Copyright (C) 2015 BlackBerry Limited. All rights reserved.
-**
-** Contact: BlackBerry (qt@blackberry.com)
+** Copyright (C) 2015 Canonical Ltd.
+** Contact: http://www.qt.io/licensing
 **
 ** This file is part of Qt Creator.
 **
@@ -28,27 +27,38 @@
 ** version 1.1, included in the file LGPL_EXCEPTION.txt in this package.
 **
 ****************************************************************************/
+#ifndef CMAKEPROJECTMANAGER_CMAKEKITINFORMATION_H
+#define CMAKEPROJECTMANAGER_CMAKEKITINFORMATION_H
 
-#ifndef SRCPROJECTPATHCHOOSER_H
-#define SRCPROJECTPATHCHOOSER_H
+#include "cmake_global.h"
 
-#include <utils/pathchooser.h>
+#include <projectexplorer/kitmanager.h>
 
-namespace Qnx {
-namespace Internal {
+namespace CMakeProjectManager {
 
-class SrcProjectPathChooser : public Utils::PathChooser
+class CMakeTool;
+
+class CMAKE_EXPORT CMakeKitInformation : public ProjectExplorer::KitInformation
 {
     Q_OBJECT
 public:
-    explicit SrcProjectPathChooser(QWidget *parent = 0);
-    virtual ~SrcProjectPathChooser();
+    CMakeKitInformation();
 
-    virtual bool validatePath(const QString &path, QString *errorMessage = 0);
+    static Core::Id id();
+
+    static CMakeTool *cmakeTool(const ProjectExplorer::Kit *k);
+    static void setCMakeTool(ProjectExplorer::Kit *k, const Core::Id id);
+    static Core::Id defaultValue();
+
+    // KitInformation interface
+    QVariant defaultValue(ProjectExplorer::Kit *) const Q_DECL_OVERRIDE;
+    QList<ProjectExplorer::Task> validate(const ProjectExplorer::Kit *k) const Q_DECL_OVERRIDE;
+    void setup(ProjectExplorer::Kit *k) Q_DECL_OVERRIDE;
+    void fix(ProjectExplorer::Kit *k) Q_DECL_OVERRIDE;
+    virtual ItemList toUserOutput(const ProjectExplorer::Kit *k) const Q_DECL_OVERRIDE;
+    virtual ProjectExplorer::KitConfigWidget *createConfigWidget(ProjectExplorer::Kit *k) const Q_DECL_OVERRIDE;
 };
 
-} // namespace Internal
-} // namespace Qnx
+} // namespace CMakeProjectManager
 
-
-#endif // SRCPROJECTPATHCHOOSER_H
+#endif // CMAKEPROJECTMANAGER_CMAKEKITINFORMATION_H
