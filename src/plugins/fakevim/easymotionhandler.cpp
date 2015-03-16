@@ -46,15 +46,19 @@ public:
     bool placeholderAvailable();
     bool firstLineVisible();
 
-    QTextDocument* m_document;
-    QChar m_input;
-    int m_placeholderCnt;
-    QVector<int> m_foundPositions;
-    QString m_character;
+    // not owned by EasyMotion
     QTextCursor* m_cursor;
     QPlainTextEdit* m_editor;
+
+    // owned by EasyMotion
+    QSharedPointer<QTextDocument> m_document;
     QSharedPointer<EasyMotionOverlay> m_overlay;
+
+    QChar m_input;
+    QString m_character;
+    int m_placeholderCnt;
     QStringList m_placeholders;
+    QVector<int> m_foundPositions;
 };
 
 ///
@@ -178,12 +182,12 @@ public:
 class EasyMotionOverlay : public TextEditor::IOverlay
 {
 public:
-    EasyMotionOverlay(const QPlainTextEdit* editor, QTextDocument* document) :
+    EasyMotionOverlay(const QPlainTextEdit* editor, QSharedPointer<QTextDocument> document) :
         m_paintUpperMargin(false)
     {
         m_paintRect = editor->viewport()->rect();
         m_backColor = editor->palette().foreground();
-        m_document.reset(document);
+        m_document = document;
     }
 
     ///
@@ -233,7 +237,7 @@ public:
     /// \brief m_document specially prepared document that will be painter over
     /// what is currently visible in the editor
     ///
-    QScopedPointer<QTextDocument> m_document;
+    QSharedPointer<QTextDocument> m_document;
 };
 
 EasyMotionHandler::EasyMotionHandler(QTextCursor* cursor,
@@ -279,8 +283,7 @@ void SharedState::prepareDocument()
     character.append(m_input);
     m_character = character;
 
-    // overlay will own this document
-    m_document = new QTextDocument;
+    m_document.reset(new QTextDocument);
 }
 
 bool SharedState::prepareAndSendOverlay()
@@ -292,7 +295,7 @@ bool SharedState::prepareAndSendOverlay()
     if (firstLineVisible())
         m_overlay->m_paintUpperMargin = true;
     // overlay owns the document now
-    m_document = nullptr;
+    m_document.reset();
 
     if (m_foundPositions.count() == 0) {
         // none found, don't do anything
@@ -349,7 +352,7 @@ int SharedState::copyVisibleDocument()
         currentBlock = currentBlock.previous();
 
         if (currentBlock.isValid() && currentBlock.isVisible()) {
-            QTextCursor tc(m_document);
+            QTextCursor tc(m_document.data());
             QTextCharFormat format;
             format.setFont(currentBlock.charFormat().font());
             format.setForeground(fgColor);
@@ -380,7 +383,7 @@ int SharedState::copyVisibleDocument()
 
 void SharedState::insertPlaceholdersForward(int fromPosition)
 {
-    QTextCursor tc(m_document);
+    QTextCursor tc(m_document.data());
 
     while (!tc.atEnd() && placeholderAvailable())
     {
@@ -412,7 +415,7 @@ void SharedState::insertPlaceholdersForward(int fromPosition)
 
 void SharedState::insertPlaceholdersBackward(int fromPosition)
 {
-    QTextCursor tc(m_document);
+    QTextCursor tc(m_document.data());
     tc.movePosition(QTextCursor::End);
 
     while (!tc.atStart() && placeholderAvailable())
