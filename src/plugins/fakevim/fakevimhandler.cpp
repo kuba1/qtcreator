@@ -2163,7 +2163,7 @@ public:
 
     void miniBufferTextEdited(const QString &text, int cursorPos, int anchorPos);
 
-    QScopedPointer<EasyMotionHandler> m_easyMotionHandler;
+    QScopedPointer<EasyMotion::Handler> m_easyMotionHandler;
 
     // Data shared among editors with same document.
     struct BufferData
@@ -2352,7 +2352,7 @@ void FakeVimHandler::Private::init()
     m_ctrlVAccumulator = 0;
     m_ctrlVLength = 0;
     m_ctrlVBase = 0;
-    m_easyMotionHandler.reset(new EasyMotionHandler(&m_cursor, m_plaintextedit));
+    m_easyMotionHandler.reset(new EasyMotion::Handler(&m_cursor, m_plaintextedit));
 
     initSingleShotTimer(&m_fixCursorTimer, 0, this, SLOT(onFixCursorTimeout()));
     initSingleShotTimer(&m_inputTimer, 1000, this, SLOT(onInputTimeout()));
@@ -8618,7 +8618,7 @@ void FakeVimHandler::setEnableEasyMotion(bool state)
 {
     if (state) {
         d->m_easyMotionHandler.reset(
-                    new EasyMotionHandler(&d->m_cursor, d->m_plaintextedit));
+                    new EasyMotion::Handler(&d->m_cursor, d->m_plaintextedit));
     } else
         d->m_easyMotionHandler.reset();
 }

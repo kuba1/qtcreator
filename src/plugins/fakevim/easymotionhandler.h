@@ -7,20 +7,21 @@ class QChar;
 
 namespace FakeVim {
 namespace Internal {
+namespace EasyMotion {
 
-class SharedState;
-class EasyMotionState;
+class Context;
+class IState;
 
 ///
 /// \brief The EasyMotionHandler class handler for easy motion. Encapsulates
 /// state management and provides simple interface for FakeVim handler
 ///
-class EasyMotionHandler
+class Handler
 {
 public:
-    EasyMotionHandler();
-    EasyMotionHandler(QTextCursor *cursor, QPlainTextEdit *editor);
-    ~EasyMotionHandler();
+    Handler();
+    Handler(QTextCursor *cursor, QPlainTextEdit *editor);
+    ~Handler();
 
     ///
     /// \brief handle handle incoming input (character)
@@ -43,15 +44,16 @@ private:
     ///
     /// \brief m_h helper class for data manipulation
     ///
-    QScopedPointer<SharedState> m_h;
+    QScopedPointer<Context> m_ctx;
 
     ///
     /// \brief m_state this class owns state, the states objects just produce
     /// appropriate states
     ///
-    QScopedPointer<EasyMotionState> m_state;
+    QScopedPointer<IState> m_state;
 };
 
+}
 }
 }
 

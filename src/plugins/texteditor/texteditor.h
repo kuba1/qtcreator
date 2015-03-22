@@ -135,15 +135,11 @@ public:
     }
 };
 
-class EasyMotionOverlayEvent : public QEvent
+class ShowOverlayEvent : public QEvent
 {
 public:
-    EasyMotionOverlayEvent() :
-        QEvent(OverlayEventType),
-        m_overlay(0),
-        m_show(false)
+    ShowOverlayEvent() : QEvent(Type), m_overlay(nullptr)
     {
-
     }
 
     void setOverlay(const QSharedPointer<IOverlay> &overlay)
@@ -151,27 +147,28 @@ public:
         m_overlay = overlay;
     }
 
-    void setShow(const bool show)
-    {
-        m_show = show;
-    }
-
     QSharedPointer<IOverlay> overlay() const
     {
         return m_overlay;
     }
 
-    bool show() const
-    {
-        return m_show;
-    }
-
-    static const QEvent::Type OverlayEventType =
+    static const QEvent::Type Type =
             static_cast<QEvent::Type>(QEvent::User + 1);
 
 private:
     QSharedPointer<IOverlay> m_overlay;
     bool m_show;
+};
+
+class HideOverlayEvent : public QEvent
+{
+public:
+    HideOverlayEvent() : QEvent(Type)
+    {
+    }
+
+    static const QEvent::Type Type =
+            static_cast<QEvent::Type>(QEvent::User + 2);
 };
 
 class TEXTEDITOR_EXPORT BaseTextEditor : public Core::IEditor

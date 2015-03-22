@@ -25,174 +25,206 @@
 
 namespace FakeVim {
 namespace Internal {
+namespace EasyMotion {
 
 class EasyMotionOverlay;
 
-///
-/// \brief The SharedState struct data structure shared between this handler and
-/// states objects. Contains all the data needed to make everything work
-/// plus some helper functions.
-///
-struct SharedState
+struct Context
 {
-public:
-    void prepareDocument();
-    bool prepareAndSendOverlay();
-    int copyVisibleDocument();
-    void insertPlaceholdersForward(int fromPosition);
-    void insertPlaceholdersBackward(int fromPosition);
-    void resetPlaceholders();
-    QString placeholder();
-    bool placeholderAvailable();
-    bool firstLineVisible();
-
-    // not owned by EasyMotion
-    QTextCursor* m_cursor;
-    QPlainTextEdit* m_editor;
-
-    // owned by EasyMotion
-    QSharedPointer<QTextDocument> m_document;
-    QSharedPointer<EasyMotionOverlay> m_overlay;
-
-    QChar m_input;
-    QString m_character;
-    int m_placeholderCnt;
-    QStringList m_placeholders;
-    QVector<int> m_foundPositions;
+    QTextCursor *m_cursor;
+    QPlainTextEdit *m_editor;
 };
 
-///
-/// \brief The EasyMotionState class base class for the state, defines
-/// state interface. Each state object keeps pointer to data structure so
-/// it has access to current data
-///
-class EasyMotionState
+class IState
 {
 public:
-    EasyMotionState(SharedState* h);
-    virtual ~EasyMotionState();
+    virtual ~IState()
+    {
+    }
 
-    ///
-    /// \brief handle do the job associated with current state, set
-    /// @see m_next to next state. This is invoked after an event (new
-    /// input)
-    /// \return true if event has been handled properly
-    ///
-    virtual bool handle() = 0;
+    virtual bool handle(const QChar &input) = 0;
+    virtual bool isReset() const = 0;
+    virtual IState *next() const = 0;
+    virtual void reset() = 0;
+};
 
-    ///
-    /// \brief isReset check whether state machine is reseted (current
-    /// state is Reset)
-    /// \return is this state Reset?
-    ///
-    bool isReset() const;
+class State : public IState
+{
+public:
+    State(const Context *ctx) :
+        m_ctx{ctx},
+        m_next{nullptr},
+        m_isReset{true}
+    {
+    }
 
-    ///
-    /// \brief next get next state
-    /// \return pointer to next state
-    ///
-    EasyMotionState* next();
+    State(const State *old, bool isReset = false) :
+        m_ctx{old->m_ctx},
+        m_next{nullptr},
+        m_isReset{isReset}
+    {
+    }
 
-    ///
-    /// \brief reset force reset of the state machine. Clean up some state
-    /// data and set Reset as next state
-    ///
-    void reset();
+    bool isReset() const override
+    {
+        return m_isReset;
+    }
+
+    IState *next() const override;
+    void reset() override;
 
 protected:
+    void setNext(State *next)
+    {
+        m_next = next;
+    }
 
-    ///
-    /// \brief m_h helper class for data manipulation, owned by handler
-    ///
-    SharedState* m_h;
+    QTextCursor *cursor() const
+    {
+        return m_ctx->m_cursor;
+    }
 
-    ///
-    /// \brief m_next next state to return with @see next()
-    ///
-    EasyMotionState* m_next;
+    QPlainTextEdit *editor() const
+    {
+        return m_ctx->m_editor;
+    }
 
-    ///
-    /// \brief m_isReset true for Reset state, false for any other state,
-    /// used by @see isReset() function
-    ///
+private:
+    const Context *m_ctx;
+    IState *m_next;
     bool m_isReset;
 };
 
-///
-/// \brief The Reset class represents starting state
-///
-class Reset : public EasyMotionState
+class Reset : public State
 {
 public:
-    Reset(SharedState* h);
+    Reset(const Context *ctx) : State{ctx}
+    {
+    }
 
-    bool handle();
+    Reset(const State *old) : State{old, true}
+    {
+    }
+
+    bool handle(const QChar &input) override;
 };
 
-///
-/// \brief The SearchBackward class state indicating that searching
-/// backwards has been chosen
-///
-class SearchBackward : public EasyMotionState
+struct RealBlockPosition : public QTextBlockUserData
 {
-public:
-    SearchBackward(SharedState* h);
-
-    bool handle();
-};
-
-///
-/// \brief The SearchForward class state indicating that searching forward
-/// has been chosen
-///
-class SearchForward : public EasyMotionState
-{
-public:
-    SearchForward(SharedState* h);
-
-    bool handle();
-};
-
-///
-/// \brief The Selected class state indicating that the character to move to
-/// has been selected (after that, move and set state to Reset)
-///
-class Selected : public EasyMotionState
-{
-public:
-    Selected(SharedState* h);
-
-    bool handle();
-};
-
-///
-/// \brief The BlockPositionData class simple class to attach block positions
-/// from real document to blocks in prepared overlay document
-///
-class BlockPositionData : public QTextBlockUserData
-{
-public:
     int m_position;
 };
 
-///
-/// \brief The EasyMotionOverlay class overlay an overlay with prepared document
-/// to be drawn over current document in the editor
-///
+struct MoveForward
+{
+    void initPosition(QTextCursor &)
+    {
+    }
+
+    bool isAtLastPosition(QTextCursor &tc)
+    {
+        return tc.atEnd();
+    }
+
+    bool movePosition(QTextCursor &tc, int &position)
+    {
+        auto *pos = dynamic_cast<RealBlockPosition *>(tc.block().userData());
+        if (!pos)
+            return false;
+
+        position = pos->m_position + tc.positionInBlock();
+
+        tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+
+        return true;
+    }
+
+    bool checkPosition(int position, int fromPosition)
+    {
+        return position > fromPosition;
+    }
+};
+
+struct MoveBackward
+{
+    void initPosition(QTextCursor &tc)
+    {
+        tc.movePosition(QTextCursor::End);
+    }
+
+    bool isAtLastPosition(QTextCursor &tc)
+    {
+        return tc.atStart();
+    }
+
+    bool movePosition(QTextCursor &tc, int &position)
+    {
+        tc.movePosition(QTextCursor::PreviousCharacter,
+                        QTextCursor::KeepAnchor);
+
+        auto* pos = dynamic_cast<RealBlockPosition*>(tc.block().userData());
+        if (!pos)
+            return false;
+
+        position = pos->m_position + tc.positionInBlock();
+
+        return true;
+    }
+
+    bool checkPosition(int position, int fromPosition)
+    {
+        return position <= fromPosition;
+    }
+};
+
+template<typename Mover>
+class Search : public State
+{
+public:
+    Search(const State *old);
+    bool handle(const QChar &input) override;
+
+private:
+    void insertPlaceholders(int fromPosition, const QChar &input);
+    int copyVisibleDocument();
+    bool prepareAndSendOverlay();
+    bool placeholderAvailable();
+    QString placeholder();
+    bool firstLineVisible();
+
+    Mover m_mover;
+
+    int m_placeholderCnt;
+    QScopedPointer<QTextDocument> m_document;
+    QMap<QString, int> m_foundPositions;
+    QStringList m_placeholders = QString::fromUtf8(
+                "a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|"
+                "I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|1|2|3|4|5|6|7|8|9|0|[|]|;|'|,|.|"
+                "/|!|@|#|$|%|^|&|*|(|)|{|}|:|\"|<|>|?").split(QString::fromUtf8("|"));
+};
+
+class Selected : public State
+{
+public:
+    Selected(const State *old, const QMap<QString, int> &&foundPositions);
+
+    bool handle(const QChar &input);
+
+private:
+    const QMap<QString, int> m_foundPositions;
+};
+
 class EasyMotionOverlay : public TextEditor::IOverlay
 {
 public:
-    EasyMotionOverlay(const QPlainTextEdit* editor, QSharedPointer<QTextDocument> document) :
-        m_paintUpperMargin(false)
+    EasyMotionOverlay(const QPlainTextEdit *editor,
+                      QScopedPointer<QTextDocument> &document) :
+        m_paintUpperMargin{false}
     {
         m_paintRect = editor->viewport()->rect();
         m_backColor = editor->palette().foreground();
-        m_document = document;
+        m_document.swap(document);
     }
 
-    ///
-    /// \brief paint invoked from paintEvent in the text editor widget
-    ///
     void paint(QPainter &painter)
     {
         painter.save();
@@ -212,126 +244,89 @@ public:
         painter.restore();
     }
 
-    ///
-    /// \brief m_backColor background color
-    ///
+    void setPaintUpperMargin()
+    {
+        m_paintUpperMargin = true;
+    }
+
+private:
     QBrush m_backColor;
-
-    ///
-    /// \brief m_foreColor foreground color
-    ///
     QColor m_foreColor;
-
-    ///
-    /// \brief m_paintRect visible editor rectangle (we will paint over
-    /// everythin)
-    ///
     QRect m_paintRect;
-
-    ///
-    /// \brief m_paintUpperMargin true only if first line is visible
-    ///
     bool m_paintUpperMargin;
-
-    ///
-    /// \brief m_document specially prepared document that will be painter over
-    /// what is currently visible in the editor
-    ///
-    QSharedPointer<QTextDocument> m_document;
+    QScopedPointer<QTextDocument> m_document;
 };
 
-EasyMotionHandler::EasyMotionHandler(QTextCursor* cursor,
-                                     QPlainTextEdit* editor)
+Handler::Handler(QTextCursor *cursor, QPlainTextEdit *editor)
 {
-    m_h.reset(new SharedState);
-    m_state.reset(new Reset(m_h.data()));
-    m_h->m_cursor = cursor;
-    m_h->m_editor = editor;
-    m_h->m_placeholders = QString::fromUtf8(
-        "a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|"
-        "I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|1|2|3|4|5|6|7|8|9|0|[|]|;|'|,|.|"
-                "/|!|@|#|$|%|^|&|*|(|)|{|}|:|\"|<|>|?").split(QString::fromUtf8("|"));
+    m_ctx.reset(new Context);
+    m_state.reset(new Reset(m_ctx.data()));
+    m_ctx->m_cursor = cursor;
+    m_ctx->m_editor = editor;
 }
 
-EasyMotionHandler::~EasyMotionHandler()
+Handler::~Handler()
 {
 }
 
-bool EasyMotionHandler::handle(const QChar &input)
+bool Handler::handle(const QChar &input)
 {
-    m_h->m_input = input;
-    bool handled = m_state->handle();
+    bool handled = m_state->handle(input);
     m_state.reset(m_state->next());
 
     return handled;
 }
 
-void EasyMotionHandler::reset()
+void Handler::reset()
 {
-    m_state->reset();
-    m_state.reset(m_state->next());
+    if (!m_state->isReset()) {
+        m_state->reset();
+        m_state.reset(m_state->next());
+    }
 }
 
-bool EasyMotionHandler::isReset() const
+bool Handler::isReset() const
 {
     return m_state->isReset();
 }
 
-void SharedState::prepareDocument()
+IState *State::next() const
 {
-    QString character;
-    character.append(m_input);
-    m_character = character;
+    if (m_next)
+        return m_next;
+    else
+        return new Reset(this);
+}
 
+void State::reset()
+{
+    m_next = new Reset(this);
+
+    TextEditor::HideOverlayEvent ev;
+    QCoreApplication::sendEvent(editor(), &ev);
+}
+
+template<typename Mover>
+Search<Mover>::Search(const State *old) : State(old)
+{
+}
+
+template<typename Mover>
+int Search<Mover>::copyVisibleDocument()
+{
     m_document.reset(new QTextDocument);
-}
 
-bool SharedState::prepareAndSendOverlay()
-{
-    TextEditor::EasyMotionOverlayEvent ev;
-
-    m_overlay = QSharedPointer<EasyMotionOverlay>(
-                    new EasyMotionOverlay(m_editor, m_document));
-    if (firstLineVisible())
-        m_overlay->m_paintUpperMargin = true;
-    // overlay owns the document now
-    m_document.reset();
-
-    if (m_foundPositions.count() == 0) {
-        // none found, don't do anything
-        return true;
-    } else if (m_foundPositions.count() == 1) {
-        // only one found, move immediately
-        m_cursor->setPosition(m_foundPositions.first());
-        return true;
-    }
-
-    ev.setOverlay(m_overlay);
-    ev.setShow(true);
-
-    QCoreApplication::sendEvent(m_editor, &ev);
-
-    return false;
-}
-
-struct RealBlockPosition : public QTextBlockUserData
-{
-    int m_position;
-};
-
-int SharedState::copyVisibleDocument()
-{
     QTextCursor beginCursor =
-        m_editor->cursorForPosition(m_editor->viewport()->rect().topLeft());
+            editor()->cursorForPosition(editor()->viewport()->rect().topLeft());
     QTextCursor endCursor =
-        m_editor->cursorForPosition(m_editor->viewport()->rect().bottomRight());
+            editor()->cursorForPosition(editor()->viewport()->rect().bottomRight());
     endCursor.movePosition(QTextCursor::NextBlock);
 
-    QTextDocument* editorDocument = m_editor->document();
+    QTextDocument* editorDocument = editor()->document();
     const QTextBlock firstVisibleBlock =
-        editorDocument->findBlock(beginCursor.position());
+            editorDocument->findBlock(beginCursor.position());
     const QTextBlock lastVisibleBlock =
-        editorDocument->findBlock(endCursor.position());
+            editorDocument->findBlock(endCursor.position());
 
     QVector<int> blockPositions;
 
@@ -346,7 +341,7 @@ int SharedState::copyVisibleDocument()
     m_document->setDefaultCursorMoveStyle(
                 editorDocument->defaultCursorMoveStyle());
 
-    resetPlaceholders();
+    m_placeholderCnt = 0;
     auto currentBlock = lastVisibleBlock;
     do {
         currentBlock = currentBlock.previous();
@@ -378,78 +373,11 @@ int SharedState::copyVisibleDocument()
 
     m_foundPositions.clear();
 
-    return m_editor->textCursor().position();
+    return editor()->textCursor().position();
 }
 
-void SharedState::insertPlaceholdersForward(int fromPosition)
-{
-    QTextCursor tc(m_document.data());
-
-    while (!tc.atEnd() && placeholderAvailable())
-    {
-        auto* pos = static_cast<RealBlockPosition*>(tc.block().userData());
-        if (!pos)
-            break;
-
-        int position = pos->m_position + tc.positionInBlock();
-
-        // select each character and compare to what we are looking for
-        tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
-
-        if (position > fromPosition) {
-            if (tc.selectedText() == m_character) {
-                QTextCharFormat format(tc.block().charFormat());
-                format.setForeground(QColor(255,0,0,255));
-
-                m_foundPositions.push_back(position);
-
-                // remove found character and insert a placeholder instead
-                tc.removeSelectedText();
-                tc.insertText(placeholder(), format);
-            }
-        }
-        // move anchor
-        tc.setPosition(tc.position());
-    }
-}
-
-void SharedState::insertPlaceholdersBackward(int fromPosition)
-{
-    QTextCursor tc(m_document.data());
-    tc.movePosition(QTextCursor::End);
-
-    while (!tc.atStart() && placeholderAvailable())
-    {
-        tc.movePosition(QTextCursor::PreviousCharacter,
-                        QTextCursor::KeepAnchor);
-
-        auto* pos = static_cast<RealBlockPosition*>(tc.block().userData());
-        if (!pos)
-            break;
-
-        int position = pos->m_position + tc.positionInBlock();
-        if (position <= fromPosition) {
-            if (tc.selectedText() == m_character) {
-                QTextCharFormat format(tc.block().charFormat());
-                format.setForeground(QColor(255,0,0,255));
-
-                m_foundPositions.push_back(position);
-
-                tc.removeSelectedText();
-                tc.insertText(placeholder(), format);
-            }
-        }
-        // move anchor
-        tc.setPosition(tc.position());
-    }
-}
-
-void SharedState::resetPlaceholders()
-{
-    m_placeholderCnt = 0;
-}
-
-QString SharedState::placeholder()
+template<typename Mover>
+QString Search<Mover>::placeholder()
 {
     if (placeholderAvailable())
         return m_placeholders[m_placeholderCnt++];
@@ -457,132 +385,126 @@ QString SharedState::placeholder()
         return QString::fromUtf8("ERROR");
 }
 
-bool SharedState::placeholderAvailable()
+template<typename Mover>
+bool Search<Mover>::placeholderAvailable()
 {
     return m_placeholderCnt < m_placeholders.size();
 }
 
-bool SharedState::firstLineVisible()
+template<typename Mover>
+bool Search<Mover>::firstLineVisible()
 {
     QTextCursor beginCursor =
-        m_editor->cursorForPosition(m_editor->viewport()->rect().topLeft());
+            editor()->cursorForPosition(editor()->viewport()->rect().topLeft());
 
     const QTextBlock firstVisibleBlock =
-        m_editor->document()->findBlock(beginCursor.position());
+            editor()->document()->findBlock(beginCursor.position());
 
-    return firstVisibleBlock == m_editor->document()->firstBlock();
+    return firstVisibleBlock == editor()->document()->firstBlock();
 }
 
-EasyMotionState::EasyMotionState(SharedState* h) :
-    m_h(h),
-    m_next(0),
-    m_isReset(false)
+template<typename Mover>
+bool Search<Mover>::handle(const QChar &input)
 {
-}
-
-EasyMotionState::~EasyMotionState()
-{
-}
-
-bool EasyMotionState::isReset() const
-{
-    return m_isReset;
-}
-
-EasyMotionState* EasyMotionState::next()
-{
-    if (m_next)
-        return m_next;
+    insertPlaceholders(copyVisibleDocument(), input);
+    if (prepareAndSendOverlay())
+        reset();
     else
-        return new Reset(m_h);
+        setNext(new Selected(this, std::move(m_foundPositions)));
+
+    return true;
 }
 
-void EasyMotionState::reset()
+template<typename Mover>
+void Search<Mover>::insertPlaceholders(int fromPosition, const QChar &input)
 {
-    TextEditor::EasyMotionOverlayEvent ev;
+    QTextCursor tc(m_document.data());
 
-    ev.setOverlay(m_h->m_overlay);
-    ev.setShow(false);
+    m_mover.initPosition(tc);
 
-    m_h->m_overlay.clear();
-    m_h->m_foundPositions.clear();
-    m_next = new Reset(m_h);
+    while (!m_mover.isAtLastPosition(tc) && placeholderAvailable())
+    {
+        int position;
 
-    QCoreApplication::sendEvent(m_h->m_editor, &ev);
+        if (!m_mover.movePosition(tc, position))
+            break;
+
+        if (m_mover.checkPosition(position, fromPosition)) {
+            QString character;
+            character.append(input);
+
+            if (tc.selectedText() == character) {
+                QTextCharFormat format(tc.block().charFormat());
+                format.setForeground(QColor(255,0,0,255));
+
+                QString ph = placeholder();
+                m_foundPositions[ph] = position;
+
+                tc.removeSelectedText();
+                tc.insertText(ph, format);
+            }
+        }
+        // move anchor
+        tc.setPosition(tc.position());
+    }
 }
 
-Reset::Reset(SharedState* priv) : EasyMotionState(priv)
+template<typename Mover>
+bool Search<Mover>::prepareAndSendOverlay()
 {
-    m_isReset = true;
+    EasyMotionOverlay* overlay =
+            new EasyMotionOverlay(editor(), m_document);
+
+    if (firstLineVisible())
+        overlay->setPaintUpperMargin();
+    // overlay owns the document now
+
+    if (m_foundPositions.count() == 0) {
+        // none found, don't do anything
+        return true;
+    } else if (m_foundPositions.count() == 1) {
+        // only one found, move immediately
+        cursor()->setPosition(m_foundPositions.first());
+        return true;
+    }
+
+    TextEditor::ShowOverlayEvent ev;
+    ev.setOverlay(QSharedPointer<EasyMotionOverlay>(overlay));
+    QCoreApplication::sendEvent(editor(), &ev);
+
+    return false;
 }
 
-bool Reset::handle()
+bool Reset::handle(const QChar &input)
 {
-    if (m_h->m_input ==  QLatin1Char('f'))
-        m_next = new SearchForward(m_h);
-    else if (m_h->m_input == QLatin1Char('F'))
-        m_next = new SearchBackward(m_h);
+    if (input ==  QLatin1Char('f'))
+        setNext(new Search<MoveForward>(this));
+    else if (input == QLatin1Char('F'))
+        setNext(new Search<MoveBackward>(this));
     else
         return false;
     return true;
 }
 
-SearchBackward::SearchBackward(SharedState* priv) : EasyMotionState(priv)
+Selected::Selected(const State *old,
+                   const QMap<QString, int>&& foundPositions) :
+    State{old},
+    m_foundPositions(std::move(foundPositions))
 {
 }
 
-bool SearchBackward::handle()
-{
-    if (m_h->m_overlay.isNull()) {
-        m_h->prepareDocument();
-        m_h->insertPlaceholdersBackward(m_h->copyVisibleDocument());
-        if (m_h->prepareAndSendOverlay())
-            reset();
-        else
-            m_next = new Selected(m_h);
-    } else
-        reset();
-
-    return true;
-}
-
-SearchForward::SearchForward(SharedState* priv) : EasyMotionState(priv)
-{
-}
-
-bool SearchForward::handle()
-{
-    if (m_h->m_overlay.isNull()) {
-        m_h->prepareDocument();
-        m_h->insertPlaceholdersForward(m_h->copyVisibleDocument());
-        if (m_h->prepareAndSendOverlay())
-            reset();
-        else
-            m_next = new Selected(m_h);
-    } else
-        reset();
-
-    return true;
-}
-
-Selected::Selected(SharedState* priv) : EasyMotionState(priv)
-{
-}
-
-bool Selected::handle()
+bool Selected::handle(const QChar& input)
 {
     QString character;
-    int index;
+    character.append(input);
 
-    character.append(m_h->m_input);
-
-    if ((index = m_h->m_placeholders.indexOf(character)) >= 0 &&
-            index < m_h->m_foundPositions.size())
-        m_h->m_cursor->setPosition(m_h->m_foundPositions[index]);
+    if (m_foundPositions.contains(character))
+        cursor()->setPosition(m_foundPositions[character]);
     reset();
 
     return true;
 }
 
+}
 }
 }
