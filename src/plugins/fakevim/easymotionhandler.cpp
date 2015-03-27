@@ -14,6 +14,7 @@
 #include <QTextBlockUserData>
 #include <QScopedPointer>
 #include <QSharedPointer>
+#include <QPair>
 
 #include <texteditor/texteditor.h>
 #include <texteditor/texteditorconstants.h>
@@ -22,6 +23,8 @@
 #include <texteditor/texteditorsettings.h>
 
 #include "easymotionhandler.h"
+
+#include <QDebug>
 
 namespace FakeVim {
 namespace Internal {
@@ -109,70 +112,33 @@ public:
     bool handle(const QChar &input) override;
 };
 
-struct RealBlockPosition : public QTextBlockUserData
-{
-    int m_position;
-};
-
 struct MoveForward
 {
-    void initPosition(QTextCursor &)
-    {
-    }
-
     bool isAtLastPosition(QTextCursor &tc)
     {
         return tc.atEnd();
     }
 
-    bool movePosition(QTextCursor &tc, int &position)
+    void movePosition(QTextCursor &tc, int &position)
     {
-        auto *pos = dynamic_cast<RealBlockPosition *>(tc.block().userData());
-        if (!pos)
-            return false;
-
-        position = pos->m_position + tc.positionInBlock();
+        position += tc.position();
 
         tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
-
-        return true;
-    }
-
-    bool checkPosition(int position, int fromPosition)
-    {
-        return position > fromPosition;
     }
 };
 
 struct MoveBackward
 {
-    void initPosition(QTextCursor &tc)
-    {
-        tc.movePosition(QTextCursor::End);
-    }
-
     bool isAtLastPosition(QTextCursor &tc)
     {
         return tc.atStart();
     }
 
-    bool movePosition(QTextCursor &tc, int &position)
+    void movePosition(QTextCursor &tc, int &position)
     {
-        tc.movePosition(QTextCursor::PreviousCharacter,
-                        QTextCursor::KeepAnchor);
+        tc.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor);
 
-        auto* pos = dynamic_cast<RealBlockPosition*>(tc.block().userData());
-        if (!pos)
-            return false;
-
-        position = pos->m_position + tc.positionInBlock();
-
-        return true;
-    }
-
-    bool checkPosition(int position, int fromPosition)
-    {
-        return position <= fromPosition;
+        position += tc.position();
     }
 };
 
@@ -184,8 +150,9 @@ public:
     bool handle(const QChar &input) override;
 
 private:
-    void insertPlaceholders(int fromPosition, const QChar &input);
-    int copyVisibleDocument();
+    //unsigned int countOccurences(int fromPosition, const QChar &input);
+    void insertPlaceholders(const QVector<unsigned int> &positions, const QChar &input);
+    QVector<unsigned int> copyVisibleDocument();
     bool prepareAndSendOverlay();
     bool placeholderAvailable();
     QString placeholder();
@@ -312,7 +279,7 @@ Search<Mover>::Search(const State *old) : State(old)
 }
 
 template<typename Mover>
-int Search<Mover>::copyVisibleDocument()
+QVector<unsigned int> Search<Mover>::copyVisibleDocument()
 {
     m_document.reset(new QTextDocument);
 
@@ -322,13 +289,11 @@ int Search<Mover>::copyVisibleDocument()
             editor()->cursorForPosition(editor()->viewport()->rect().bottomRight());
     endCursor.movePosition(QTextCursor::NextBlock);
 
-    QTextDocument* editorDocument = editor()->document();
+    QTextDocument *editorDocument = editor()->document();
     const QTextBlock firstVisibleBlock =
             editorDocument->findBlock(beginCursor.position());
     const QTextBlock lastVisibleBlock =
             editorDocument->findBlock(endCursor.position());
-
-    QVector<int> blockPositions;
 
     auto colorScheme =
             TextEditor::TextEditorSettings::fontSettings().colorScheme();
@@ -338,10 +303,9 @@ int Search<Mover>::copyVisibleDocument()
     //set tab width
     m_document->setDefaultTextOption(editorDocument->defaultTextOption());
     m_document->setDefaultStyleSheet(editorDocument->defaultStyleSheet());
-    m_document->setDefaultCursorMoveStyle(
-                editorDocument->defaultCursorMoveStyle());
+    m_document->setDefaultCursorMoveStyle(editorDocument->defaultCursorMoveStyle());
 
-    m_placeholderCnt = 0;
+    QVector<unsigned int> blockPositions;
     auto currentBlock = lastVisibleBlock;
     do {
         currentBlock = currentBlock.previous();
@@ -360,20 +324,9 @@ int Search<Mover>::copyVisibleDocument()
         }
     } while (currentBlock != firstVisibleBlock);
 
-    auto block = m_document->begin();
-    int i = 0;
-    do {
-        auto* pos = new RealBlockPosition;
-        pos->m_position = blockPositions[i];
-
-        block.setUserData(pos);
-        block = block.next();
-        i++;
-    } while (i < blockPositions.count());
-
     m_foundPositions.clear();
 
-    return editor()->textCursor().position();
+    return blockPositions;
 }
 
 template<typename Mover>
@@ -416,33 +369,39 @@ bool Search<Mover>::handle(const QChar &input)
 }
 
 template<typename Mover>
-void Search<Mover>::insertPlaceholders(int fromPosition, const QChar &input)
+void Search<Mover>::insertPlaceholders(const QVector<unsigned int> &positions,
+                                       const QChar &input)
 {
     QTextCursor tc(m_document.data());
 
-    m_mover.initPosition(tc);
+    int position = positions[0];
+
+    unsigned int realPosition = editor()->textCursor().position();
+    for (int i = 1; i < positions.size(); ++i)
+    {
+        if (positions[i] > realPosition)
+            position = positions[i - 1];
+    }
+
+    //tc.setPosition(positions.second);
+    m_placeholderCnt = 0;
 
     while (!m_mover.isAtLastPosition(tc) && placeholderAvailable())
     {
-        int position;
+        m_mover.movePosition(tc, position);
 
-        if (!m_mover.movePosition(tc, position))
-            break;
+        QString character;
+        character.append(input);
 
-        if (m_mover.checkPosition(position, fromPosition)) {
-            QString character;
-            character.append(input);
+        if (tc.selectedText() == character) {
+            QTextCharFormat format(tc.block().charFormat());
+            format.setForeground(QColor(255,0,0,255));
 
-            if (tc.selectedText() == character) {
-                QTextCharFormat format(tc.block().charFormat());
-                format.setForeground(QColor(255,0,0,255));
+            QString ph = placeholder();
+            m_foundPositions[ph] = position;
 
-                QString ph = placeholder();
-                m_foundPositions[ph] = position;
-
-                tc.removeSelectedText();
-                tc.insertText(ph, format);
-            }
+            tc.removeSelectedText();
+            tc.insertText(ph, format);
         }
         // move anchor
         tc.setPosition(tc.position());
