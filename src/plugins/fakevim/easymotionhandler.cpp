@@ -31,6 +31,14 @@ namespace Internal {
 namespace EasyMotion {
 
 class EasyMotionOverlay;
+class Context;
+class IState;
+
+struct HandlerPrivate
+{
+    QScopedPointer<Context> m_ctx;
+    QScopedPointer<IState> m_state;
+};
 
 struct Context
 {
@@ -114,46 +122,61 @@ public:
 
 struct MoveForward
 {
+    unsigned int adjustRealPosition(unsigned int position)
+    {
+        return --position;
+    }
+
     bool isAtLastPosition(QTextCursor &tc)
     {
         return tc.atEnd();
     }
 
-    void movePosition(QTextCursor &tc, int &position)
+    void movePosition(QTextCursor &tc)
     {
-        position += tc.position();
-
         tc.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
     }
 };
 
 struct MoveBackward
 {
+    unsigned int adjustRealPosition(unsigned int position)
+    {
+        return position;
+    }
+
     bool isAtLastPosition(QTextCursor &tc)
     {
         return tc.atStart();
     }
 
-    void movePosition(QTextCursor &tc, int &position)
+    void movePosition(QTextCursor &tc)
     {
-        tc.movePosition(QTextCursor::PreviousCharacter, QTextCursor::KeepAnchor);
-
-        position += tc.position();
+        tc.movePosition(QTextCursor::PreviousCharacter,
+                        QTextCursor::KeepAnchor);
     }
 };
+
+constexpr int MULTIPLE_PLACEHOLDER = -1;
 
 template<typename Mover>
 class Search : public State
 {
 public:
     Search(const State *old);
+    Search(const Search<Mover> *old);
+
     bool handle(const QChar &input) override;
 
-private:
-    //unsigned int countOccurences(int fromPosition, const QChar &input);
-    void insertPlaceholders(const QVector<unsigned int> &positions, const QChar &input);
+protected:
+    bool contains(const QString &character) const;
+    QList<int> find(const QString &character) const;
     QVector<unsigned int> copyVisibleDocument();
+    void insertPlaceholders(const QVector<unsigned int> &positions,
+                            const QChar &input);
     bool prepareAndSendOverlay();
+
+private:
     bool placeholderAvailable();
     QString placeholder();
     bool firstLineVisible();
@@ -162,22 +185,24 @@ private:
 
     int m_placeholderCnt;
     QScopedPointer<QTextDocument> m_document;
-    QMap<QString, int> m_foundPositions;
+    QMultiMap<QString, int> m_foundPositions;
     QStringList m_placeholders = QString::fromUtf8(
-                "a|b|c|d|e|f|g|h|i|j|k|l|m|n|o|p|q|r|s|t|u|v|w|x|y|z|A|B|C|D|E|F|G|H|"
-                "I|J|K|L|M|N|O|P|Q|R|S|T|U|V|W|X|Y|Z|1|2|3|4|5|6|7|8|9|0|[|]|;|'|,|.|"
-                "/|!|@|#|$|%|^|&|*|(|)|{|}|:|\"|<|>|?").split(QString::fromUtf8("|"));
+                "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E"
+                "F G H I J K L M N O P Q R S T U V W X Y Z"
+            ).split(QString::fromUtf8(" "));
 };
 
-class Selected : public State
+template<typename Mover>
+class Selected : public Search<Mover>
 {
 public:
-    Selected(const State *old, const QMap<QString, int> &&foundPositions);
+    Selected(const Search<Mover> *old,
+             const QString &originalInput);
 
     bool handle(const QChar &input);
 
 private:
-    const QMap<QString, int> m_foundPositions;
+    QString m_originalInput;
 };
 
 class EasyMotionOverlay : public TextEditor::IOverlay
@@ -224,12 +249,13 @@ private:
     QScopedPointer<QTextDocument> m_document;
 };
 
-Handler::Handler(QTextCursor *cursor, QPlainTextEdit *editor)
+Handler::Handler(QTextCursor *cursor, QPlainTextEdit *editor) :
+    d{new HandlerPrivate}
 {
-    m_ctx.reset(new Context);
-    m_state.reset(new Reset(m_ctx.data()));
-    m_ctx->m_cursor = cursor;
-    m_ctx->m_editor = editor;
+    d->m_ctx.reset(new Context);
+    d->m_state.reset(new Reset(d->m_ctx.data()));
+    d->m_ctx->m_cursor = cursor;
+    d->m_ctx->m_editor = editor;
 }
 
 Handler::~Handler()
@@ -238,23 +264,23 @@ Handler::~Handler()
 
 bool Handler::handle(const QChar &input)
 {
-    bool handled = m_state->handle(input);
-    m_state.reset(m_state->next());
+    bool handled = d->m_state->handle(input);
+    d->m_state.reset(d->m_state->next());
 
     return handled;
 }
 
 void Handler::reset()
 {
-    if (!m_state->isReset()) {
-        m_state->reset();
-        m_state.reset(m_state->next());
+    if (!d->m_state->isReset()) {
+        d->m_state->reset();
+        d->m_state.reset(d->m_state->next());
     }
 }
 
 bool Handler::isReset() const
 {
-    return m_state->isReset();
+    return d->m_state->isReset();
 }
 
 IState *State::next() const
@@ -279,31 +305,39 @@ Search<Mover>::Search(const State *old) : State(old)
 }
 
 template<typename Mover>
+Search<Mover>::Search(const Search<Mover> *old) :
+    State{old},
+    m_foundPositions(std::move(old->m_foundPositions))
+{
+
+}
+
+template<typename Mover>
 QVector<unsigned int> Search<Mover>::copyVisibleDocument()
 {
     m_document.reset(new QTextDocument);
 
-    QTextCursor beginCursor =
-            editor()->cursorForPosition(editor()->viewport()->rect().topLeft());
-    QTextCursor endCursor =
-            editor()->cursorForPosition(editor()->viewport()->rect().bottomRight());
+    auto beginCursor = editor()->cursorForPosition(
+                editor()->viewport()->rect().topLeft());
+    auto endCursor = editor()->cursorForPosition(
+                editor()->viewport()->rect().bottomRight());
+
     endCursor.movePosition(QTextCursor::NextBlock);
 
-    QTextDocument *editorDocument = editor()->document();
-    const QTextBlock firstVisibleBlock =
-            editorDocument->findBlock(beginCursor.position());
-    const QTextBlock lastVisibleBlock =
-            editorDocument->findBlock(endCursor.position());
+    auto *editorDocument = editor()->document();
+    auto firstVisibleBlock = editorDocument->findBlock(beginCursor.position());
+    auto lastVisibleBlock = editorDocument->findBlock(endCursor.position());
 
     auto colorScheme =
             TextEditor::TextEditorSettings::fontSettings().colorScheme();
-    QColor fgColor = colorScheme.formatFor(TextEditor::C_TEXT).foreground();
+    auto fgColor = colorScheme.formatFor(TextEditor::C_TEXT).foreground();
     fgColor.setAlpha(128);
 
     //set tab width
     m_document->setDefaultTextOption(editorDocument->defaultTextOption());
     m_document->setDefaultStyleSheet(editorDocument->defaultStyleSheet());
-    m_document->setDefaultCursorMoveStyle(editorDocument->defaultCursorMoveStyle());
+    m_document->setDefaultCursorMoveStyle(
+                editorDocument->defaultCursorMoveStyle());
 
     QVector<unsigned int> blockPositions;
     auto currentBlock = lastVisibleBlock;
@@ -332,25 +366,19 @@ QVector<unsigned int> Search<Mover>::copyVisibleDocument()
 template<typename Mover>
 QString Search<Mover>::placeholder()
 {
-    if (placeholderAvailable())
+    if (m_placeholderCnt < m_placeholders.size() - 1)
         return m_placeholders[m_placeholderCnt++];
     else
-        return QString::fromUtf8("ERROR");
-}
-
-template<typename Mover>
-bool Search<Mover>::placeholderAvailable()
-{
-    return m_placeholderCnt < m_placeholders.size();
+        return m_placeholders[m_placeholderCnt];
 }
 
 template<typename Mover>
 bool Search<Mover>::firstLineVisible()
 {
-    QTextCursor beginCursor =
+    auto beginCursor =
             editor()->cursorForPosition(editor()->viewport()->rect().topLeft());
 
-    const QTextBlock firstVisibleBlock =
+    auto firstVisibleBlock =
             editor()->document()->findBlock(beginCursor.position());
 
     return firstVisibleBlock == editor()->document()->firstBlock();
@@ -363,9 +391,42 @@ bool Search<Mover>::handle(const QChar &input)
     if (prepareAndSendOverlay())
         reset();
     else
-        setNext(new Selected(this, std::move(m_foundPositions)));
+        setNext(new Selected<Mover>(this, input));
 
     return true;
+}
+
+template<typename Mover>
+bool Search<Mover>::contains(const QString &character) const
+{
+    return m_foundPositions.contains(character);
+}
+
+template<typename Mover>
+QList<int> Search<Mover>::find(const QString &character) const
+{
+    return m_foundPositions.values(character);
+}
+
+unsigned int positionToRealPosition(const QVector<unsigned int> &realPositions,
+                                    const QTextCursor &tc)
+{
+    return realPositions[tc.blockNumber()] + tc.positionInBlock();
+}
+
+void realPositionToPosition(const QVector<unsigned int> &realPositions,
+                            QTextCursor &tc,
+                            const QTextCursor &tcReal)
+{
+    unsigned int realPosition = tcReal.position();
+
+    while (positionToRealPosition(realPositions, tc) < realPosition)
+        tc.movePosition(QTextCursor::NextBlock);
+
+    tc.movePosition(QTextCursor::PreviousBlock);
+
+    while(positionToRealPosition(realPositions, tc) != realPosition)
+        tc.movePosition(QTextCursor::NextCharacter);
 }
 
 template<typename Mover>
@@ -374,21 +435,13 @@ void Search<Mover>::insertPlaceholders(const QVector<unsigned int> &positions,
 {
     QTextCursor tc(m_document.data());
 
-    int position = positions[0];
+    realPositionToPosition(positions, tc, editor()->textCursor());
 
-    unsigned int realPosition = editor()->textCursor().position();
-    for (int i = 1; i < positions.size(); ++i)
-    {
-        if (positions[i] > realPosition)
-            position = positions[i - 1];
-    }
-
-    //tc.setPosition(positions.second);
     m_placeholderCnt = 0;
 
-    while (!m_mover.isAtLastPosition(tc) && placeholderAvailable())
+    while (!m_mover.isAtLastPosition(tc))
     {
-        m_mover.movePosition(tc, position);
+        m_mover.movePosition(tc);
 
         QString character;
         character.append(input);
@@ -398,7 +451,8 @@ void Search<Mover>::insertPlaceholders(const QVector<unsigned int> &positions,
             format.setForeground(QColor(255,0,0,255));
 
             QString ph = placeholder();
-            m_foundPositions[ph] = position;
+            m_foundPositions.insert(ph, m_mover.adjustRealPosition(
+                        positionToRealPosition(positions, tc)));
 
             tc.removeSelectedText();
             tc.insertText(ph, format);
@@ -445,21 +499,46 @@ bool Reset::handle(const QChar &input)
     return true;
 }
 
-Selected::Selected(const State *old,
-                   const QMap<QString, int>&& foundPositions) :
-    State{old},
-    m_foundPositions(std::move(foundPositions))
+template<typename Mover>
+Selected<Mover>::Selected(const Search<Mover> *old,
+                          const QString &originalInput) :
+    Search<Mover>{old},
+    m_originalInput{originalInput}
 {
 }
 
-bool Selected::handle(const QChar& input)
+template<typename Mover>
+bool Selected<Mover>::handle(const QChar& input)
 {
     QString character;
     character.append(input);
 
-    if (m_foundPositions.contains(character))
-        cursor()->setPosition(m_foundPositions[character]);
-    reset();
+    if (this->contains(character)) {
+        auto valuesForSelected = this->find(character);
+
+        if (valuesForSelected.size() > 1) { // go to stage 2
+            this->cursor()->setPosition(valuesForSelected.last());
+
+            this->insertPlaceholders(this->copyVisibleDocument(), m_originalInput.at(0));
+            if (this->prepareAndSendOverlay())
+                this->reset();
+            else
+                this->setNext(new Selected<Mover>(this, m_originalInput));
+            /*
+            QMultiMap<QString, int> nextPositions;
+
+            foreach(auto value, valuesForSelected) {
+                //nextPositions
+            }
+
+            this->setNext(new Selected<Mover>(this, std::move(nextPositions)));
+            */
+
+            return true;
+        } else
+            this->cursor()->setPosition(valuesForSelected.first());
+    }
+    this->reset();
 
     return true;
 }
