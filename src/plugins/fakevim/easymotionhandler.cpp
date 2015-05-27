@@ -168,7 +168,7 @@ public:
 
     bool handle(const QChar &input) override;
 
-protected:
+//protected:
     bool contains(const QString &character) const;
     QList<int> find(const QString &character) const;
     QVector<unsigned int> copyVisibleDocument();
@@ -193,7 +193,7 @@ private:
 };
 
 template<typename Mover>
-class Selected : public Search<Mover>
+class Selected : public State
 {
 public:
     Selected(const Search<Mover> *old,
@@ -202,6 +202,7 @@ public:
     bool handle(const QChar &input);
 
 private:
+    Search<Mover> m_searcher;
     QString m_originalInput;
 };
 
@@ -502,7 +503,8 @@ bool Reset::handle(const QChar &input)
 template<typename Mover>
 Selected<Mover>::Selected(const Search<Mover> *old,
                           const QString &originalInput) :
-    Search<Mover>{old},
+    State{old},
+    m_searcher{old},
     m_originalInput{originalInput}
 {
 }
@@ -513,17 +515,21 @@ bool Selected<Mover>::handle(const QChar& input)
     QString character;
     character.append(input);
 
-    if (this->contains(character)) {
-        auto valuesForSelected = this->find(character);
+    if (m_searcher.contains(character)) {
+        auto valuesForSelected = m_searcher.find(character);
 
         if (valuesForSelected.size() > 1) { // go to stage 2
-            this->cursor()->setPosition(valuesForSelected.last());
+            cursor()->setPosition(valuesForSelected.last());
+            auto tc = editor()->textCursor();
+            tc.setPosition(valuesForSelected.last());
+            editor()->setTextCursor(tc);
 
-            this->insertPlaceholders(this->copyVisibleDocument(), m_originalInput.at(0));
-            if (this->prepareAndSendOverlay())
-                this->reset();
+            m_searcher.insertPlaceholders(m_searcher.copyVisibleDocument(), m_originalInput.at(0));
+            if (m_searcher.prepareAndSendOverlay())
+                m_searcher.reset();
             else
-                this->setNext(new Selected<Mover>(this, m_originalInput));
+                setNext(new Selected<Mover>(&m_searcher, m_originalInput));
+
             /*
             QMultiMap<QString, int> nextPositions;
 
@@ -531,14 +537,14 @@ bool Selected<Mover>::handle(const QChar& input)
                 //nextPositions
             }
 
-            this->setNext(new Selected<Mover>(this, std::move(nextPositions)));
+            m_searcher.setNext(new Selected<Mover>(this, std::move(nextPositions)));
             */
 
             return true;
         } else
-            this->cursor()->setPosition(valuesForSelected.first());
+            cursor()->setPosition(valuesForSelected.first());
     }
-    this->reset();
+    reset();
 
     return true;
 }
