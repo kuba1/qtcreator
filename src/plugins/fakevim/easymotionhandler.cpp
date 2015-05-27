@@ -187,7 +187,7 @@ private:
     QScopedPointer<QTextDocument> m_document;
     QMultiMap<QString, int> m_foundPositions;
     QStringList m_placeholders = QString::fromUtf8(
-                "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E"
+                "a b c d e f g h i j k l m n o p q r s t u v w x y z A B C D E "
                 "F G H I J K L M N O P Q R S T U V W X Y Z"
             ).split(QString::fromUtf8(" "));
 };
@@ -519,7 +519,8 @@ bool Selected<Mover>::handle(const QChar& input)
         auto valuesForSelected = m_searcher.find(character);
 
         if (valuesForSelected.size() > 1) { // go to stage 2
-            cursor()->setPosition(valuesForSelected.last());
+            //cursor()->setPosition(valuesForSelected.last());
+
             auto tc = editor()->textCursor();
             tc.setPosition(valuesForSelected.last());
             editor()->setTextCursor(tc);
@@ -529,16 +530,6 @@ bool Selected<Mover>::handle(const QChar& input)
                 m_searcher.reset();
             else
                 setNext(new Selected<Mover>(&m_searcher, m_originalInput));
-
-            /*
-            QMultiMap<QString, int> nextPositions;
-
-            foreach(auto value, valuesForSelected) {
-                //nextPositions
-            }
-
-            m_searcher.setNext(new Selected<Mover>(this, std::move(nextPositions)));
-            */
 
             return true;
         } else
